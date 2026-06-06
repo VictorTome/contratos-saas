@@ -1,0 +1,295 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  cnpj      String   @unique
+  createdAt DateTime @default(now())
+
+  users          User[]
+  contracts      Contract[]
+  templates      ContractTemplate[]
+  obras          Obra[]
+  purchaseOrders PurchaseOrder[]
+
+  @@map("companies")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  companyId    String
+  name         String
+  email        String
+  passwordHash String
+  role         Role     @default(MANAGER)
+  createdAt    DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, email])
+  @@map("users")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
+model ContractTemplate {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  type      ContractType
+  bodyHtml  String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  company   Company                 @relation(fields: [companyId], references: [id])
+  fields    ContractTemplateField[]
+  contracts Contract[]
+
+  @@map("contract_templates")
+}
+
+model ContractTemplateField {
+  id         String           @id @default(uuid())
+  templateId String
+  key        String
+  label      String
+  fieldType  FieldType        @default(TEXT)
+  required   Boolean          @default(true)
+  order      Int              @default(0)
+
+  template ContractTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@map("contract_template_fields")
+}
+
+enum ContractType {
+  SERVICE
+  EMPLOYMENT
+  CONSTRUCTION
+  LEASE
+  OTHER
+}
+
+enum FieldType {
+  TEXT
+  NUMBER
+  DATE
+  TEXTAREA
+  EMAIL
+  CURRENCY
+}
+
+model Contract {
+  id        String         @id @default(uuid())
+  companyId String
+  templateId String?
+  title     String
+  type      ContractType
+  status    ContractStatus @default(DRAFT)
+  partyName String
+  partyDoc  String?
+  value     Decimal?       @db.Decimal(12, 2)
+  startDate DateTime?
+  endDate   DateTime?
+  fields    Json           @default("{}")
+  bodyHtml  String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  company           Company            @relation(fields: [companyId], references: [id])
+  template          ContractTemplate?  @relation(fields: [templateId], references: [id])
+  signatureRequests SignatureRequest[]
+  obra              Obra?
+
+  @@index([companyId, status])
+  @@map("contracts")
+}
+
+enum ContractStatus {
+  DRAFT
+  PENDING_SIGNATURE
+  SIGNED
+  EXPIRED
+  CANCELLED
+}
+
+model SignatureRequest {
+  id           String           @id @default(uuid())
+  contractId   String
+  channel      SignatureChannel
+  status       SignatureStatus  @default(PENDING)
+  partyName    String
+  partyContact String
+  token        String           @unique @default(uuid())
+  sentAt       DateTime?
+  signedAt     DateTime?
+  expiresAt    DateTime?
+  ipAddress    String?
+  createdAt    DateTime         @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@map("signature_requests")
+}
+
+enum SignatureChannel {
+  EMAIL
+  WHATSAPP
+  BOTH
+}
+
+enum SignatureStatus {
+  PENDING
+  SENT
+  SIGNED
+  EXPIRED
+  CANCELLED
+}
+
+model Obra {
+  id             String     @id @default(uuid())
+  companyId      String
+  contractId     String?    @unique
+  name           String
+  address        String?
+  status         ObraStatus @default(PLANNING)
+  budgetPlanned  Decimal?   @db.Decimal(12, 2)
+  budgetRealized Decimal    @default(0) @db.Decimal(12, 2)
+  startDate      DateTime?
+  endDate        DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  company        Company         @relation(fields: [companyId], references: [id])
+  contract       Contract?       @relation(fields: [contractId], references: [id])
+  steps          ObraStep[]
+  vistorias      ObraVistoria[]
+  custos         ObraCusto[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([companyId, status])
+  @@map("obras")
+}
+
+enum ObraStatus {
+  PLANNING
+  IN_PROGRESS
+  INSPECTING
+  COMPLETED
+  CANCELLED
+}
+
+model ObraStep {
+  id      String     @id @default(uuid())
+  obraId  String
+  name    String
+  phase   ObraPhase
+  status  StepStatus @default(PENDING)
+  dueDate DateTime?
+  order   Int        @default(0)
+  notes   String?
+
+  obra Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+
+  @@map("obra_steps")
+}
+
+enum ObraPhase {
+  PLANNING
+  EXECUTION
+  DELIVERY
+}
+
+enum StepStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  BLOCKED
+}
+
+model ObraVistoria {
+  id          String       @id @default(uuid())
+  obraId      String
+  type        VistoriaType
+  description String?
+  photoUrls   Json         @default("[]")
+  createdAt   DateTime     @default(now())
+
+  obra Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+
+  @@map("obra_vistorias")
+}
+
+enum VistoriaType {
+  INITIAL
+  PROGRESS
+  FINAL
+}
+
+model ObraCusto {
+  id          String   @id @default(uuid())
+  obraId      String
+  category    String
+  description String
+  amount      Decimal  @db.Decimal(12, 2)
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  obra Obra @relation(fields: [obraId], references: [id], onDelete: Cascade)
+
+  @@map("obra_custos")
+}
+
+model PurchaseOrder {
+  id          String   @id @default(uuid())
+  companyId   String
+  obraId      String
+  cnpjPagador String
+  supplier    String
+  status      POStatus @default(DRAFT)
+  items       Json     @default("[]")
+  total       Decimal  @db.Decimal(12, 2)
+  notes       String?
+  issuedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+  obra    Obra    @relation(fields: [obraId], references: [id])
+
+  @@index([companyId, status])
+  @@map("purchase_orders")
+}
+
+enum POStatus {
+  DRAFT
+  ISSUED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  companyId String
+  userId    String?
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([companyId, entity, entityId])
+  @@map("audit_logs")
+}
